@@ -1,0 +1,69 @@
+:root {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  color: #202722;
+  background: var(--canvas);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-optical-sizing: auto;
+  font-weight: 400;
+  --ink: #202722;
+  --muted: #7d8780;
+  --line: #e4e8e1;
+  --canvas: #f7f8f4;
+  --paper: #fbfcf9;
+  --leaf: #19372d;
+  --leaf-light: #c8f277;
+  --coral: #d66349;
+  --side-text: #ecf0e9;
+  --side-muted: #aebdb2;
+  --side-line: #355245;
+  --side-button: #27473a;
+  --side-button-hover: #315443;
+  --side-input: #142f25;
+  --side-input-line: #476153;
+}
+
+:root[data-theme='ocean'] {
+  --ink: #183a45;
+  --muted: #697f80;
+  --line: #dce9e7;
+  --canvas: #f1f7f7;
+  --paper: #fbfdfc;
+  --leaf: #153c4a;
+  --leaf-light: #80ddcb;
+  --coral: #ce664d;
+  --side-text: #f0f6f4;
+  --side-muted: #aec8c3;
+  --side-line: #355c66;
+  --side-button: #234a54;
+  --side-button-hover: #2e616a;
+  --side-input: #102f3b;
+  --side-input-line: #476d75;
+}
+
+:root[data-theme='solar'] {
+  --ink: #273033;
+  --muted: #707b7a;
+  --line: #e0e5de;
+  --canvas: #f3f5f3;
+  --paper: #fbfcfa;
+  --leaf: #293a3b;
+  --leaf-light: #f7c548;
+  --coral: #df684e;
+  --side-text: #f1f3ed;
+  --side-muted: #c0c8c1;
+  --side-line: #495355;
+  --side-button: #354647;
+  --side-button-hover: #425759;
+  --side-input: #202e30;
+  --side-input-line: #526263;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+::selection { color: #14241d; background: #d7f2a3; }

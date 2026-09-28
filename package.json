@@ -1,0 +1,35 @@
+{
+  "name": "mevars",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:client\" \"npm:server\"",
+    "client": "vite --host 127.0.0.1",
+    "server": "node --env-file-if-exists=.env --import tsx server/index.ts",
+    "build": "tsc -b && tsc --noEmit -p tsconfig.server.json && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "express": "^5.2.1",
+    "lucide-react": "^1.48.0",
+    "mammoth": "^1.13.0",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "oxlint": "^1.81.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}
