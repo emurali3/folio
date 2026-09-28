@@ -8,6 +8,7 @@
     "client": "vite --host 127.0.0.1",
     "server": "node --env-file-if-exists=.env --import tsx server/index.ts",
     "build": "tsc -b && tsc --noEmit -p tsconfig.server.json && vite build",
+    "build:pages": "tsc -b && vite build --mode pages",
     "lint": "oxlint",
     "preview": "vite preview"
   },
