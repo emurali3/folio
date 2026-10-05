@@ -40,7 +40,7 @@ const themes: Array<{ id: Theme; label: string }> = [
 const providers: Array<{ id: Provider; label: string; model: string; envKey: string }> = [
   { id: 'gemini', label: 'Gemini', model: 'gemini-3.8-flash', envKey: 'GEMINI_API_KEY' },
   { id: 'openai', label: 'OpenAI', model: 'gpt-6-luna', envKey: 'OPENAI_API_KEY' },
-  { id: 'anthropic', label: 'Anthropic', model: 'claude-haiku-4-5-20251001', envKey: 'ANTHROPIC_API_KEY' },
+  { id: 'anthropic', label: 'Claude', model: 'claude-haiku-4-5-20251001', envKey: 'ANTHROPIC_API_KEY' },
 ]
 
 const maxFiles = 120
@@ -186,9 +186,9 @@ function App() {
     return providers.some((option) => option.id === savedProvider) ? savedProvider as Provider : 'gemini'
   })
   const [browserApiKeys, setBrowserApiKeys] = useState<Record<Provider, string>>(() => ({
-    gemini: isPagesBuild ? window.sessionStorage.getItem('mevars-gemini-key') ?? '' : '',
-    openai: isPagesBuild ? window.sessionStorage.getItem('mevars-openai-key') ?? '' : '',
-    anthropic: isPagesBuild ? window.sessionStorage.getItem('mevars-anthropic-key') ?? '' : '',
+    gemini: window.sessionStorage.getItem('mevars-gemini-key') ?? '',
+    openai: window.sessionStorage.getItem('mevars-openai-key') ?? '',
+    anthropic: window.sessionStorage.getItem('mevars-anthropic-key') ?? '',
   }))
   const [apiKeyDraft, setApiKeyDraft] = useState('')
   const [folderPath, setFolderPath] = useState('')
@@ -220,7 +220,7 @@ function App() {
       .then((data: { configuredProviders?: Record<Provider, boolean>; configured?: boolean; files?: IndexedFile[]; folderName?: string }) => {
         const configured = data.configuredProviders ?? { gemini: Boolean(data.configured), openai: false, anthropic: false }
         setServerProviders(configured)
-        setApiReady(Boolean(configured.gemini))
+        setApiReady(true)
         if (data.files?.length) {
           setFiles(data.files)
           setSourceMode('path')
@@ -388,8 +388,8 @@ function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(sources
-            ? { question: currentQuestion, sources, provider }
-            : { question: currentQuestion, provider }),
+            ? { question: currentQuestion, sources, provider, browserApiKey: browserApiKeys[provider] }
+            : { question: currentQuestion, provider, browserApiKey: browserApiKeys[provider] }),
         })
         const data = await response.json() as { answer?: string; sources?: SourceMatch[]; error?: string }
         if (!response.ok) throw new Error(data.error || 'The answer could not be generated.')
@@ -418,8 +418,18 @@ function App() {
     setQuestion(value)
   }
 
-  const providerReady = isPagesBuild ? Boolean(browserApiKeys[provider]) : serverProviders?.[provider] ?? apiReady
   const activeProvider = providers.find((option) => option.id === provider)!
+  const providerReady = isPagesBuild
+    ? Boolean(browserApiKeys[provider])
+    : Boolean(serverProviders?.[provider] || browserApiKeys[provider])
+  const canAsk = providerReady && (isPagesBuild || apiReady === true)
+  const connectionStatus = !isPagesBuild && apiReady === null
+    ? 'Checking local service...'
+    : !isPagesBuild && !apiReady
+      ? 'Local service unavailable'
+      : providerReady
+        ? `${activeProvider.label} ready`
+        : `${activeProvider.label} key needed`
 
   return (
     <main className="app-shell">
@@ -443,28 +453,21 @@ function App() {
           <input ref={(element) => { folderPickerRef.current = element; element?.setAttribute('webkitdirectory', '') }} className="hidden-input" type="file" multiple onChange={addFiles} />
           <input ref={filePickerRef} className="hidden-input" type="file" multiple accept=".txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.pdf,.docx" onChange={addFiles} />
         </div>
-        {isPagesBuild ? (
-          <form className="api-key-form" onSubmit={saveBrowserApiKey}>
-            <label htmlFor="provider-select">AI PROVIDER</label>
-            <select id="provider-select" value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
-              {providers.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
-            <label htmlFor="browser-api-key">{activeProvider.label.toUpperCase()} API KEY FOR THIS TAB</label>
-            <input id="browser-api-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => setApiKeyDraft(event.target.value)} placeholder={browserApiKeys[provider] ? 'Key saved for this tab' : `Paste your ${activeProvider.label} API key`} />
-            <div className="api-key-actions">
-              <button className="folder-action" type="submit" disabled={!apiKeyDraft.trim()}><ShieldCheck size={16} /> Save key</button>
-              {browserApiKeys[provider] && <button className="file-action" type="button" onClick={clearBrowserApiKey}>Forget key</button>}
-            </div>
-            <p className="api-key-note">Stored in this tab only. Restrict keys to this site's referrer.</p>
-          </form>
-        ) : (
-          <div className="local-provider-select">
-            <label htmlFor="provider-select">AI PROVIDER</label>
-            <select id="provider-select" value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
-              {providers.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-            </select>
+        <form className="api-key-form" onSubmit={saveBrowserApiKey}>
+          <label htmlFor="provider-select">AI PROVIDER</label>
+          <select id="provider-select" value={provider} onChange={(event) => setProvider(event.target.value as Provider)}>
+            {providers.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+          <label htmlFor="browser-api-key">{activeProvider.label.toUpperCase()} API KEY FOR THIS TAB</label>
+          <input id="browser-api-key" type="password" autoComplete="off" value={apiKeyDraft} onChange={(event) => setApiKeyDraft(event.target.value)} placeholder={browserApiKeys[provider] ? 'Key saved for this tab' : `Paste your ${activeProvider.label} API key`} />
+          <div className="api-key-actions">
+            <button className="folder-action" type="submit" disabled={!apiKeyDraft.trim()}><ShieldCheck size={16} /> Save key</button>
+            {browserApiKeys[provider] && <button className="file-action" type="button" onClick={clearBrowserApiKey}>Forget key</button>}
           </div>
-        )}
+          <p className="api-key-note">{isPagesBuild
+            ? `Stored in this tab only and sent directly to ${activeProvider.label}. Restrict the key to this site's referrer.`
+            : `${activeProvider.envKey} in .env takes priority. This tab's key is used only when no .env key is configured.`}</p>
+        </form>
         {!isPagesBuild && (
           <form className="folder-form" onSubmit={indexFolder}>
             <label htmlFor="folder-path">OR ENTER A FOLDER PATH</label>
@@ -494,9 +497,9 @@ function App() {
 
         <div className="rail-footer">
           <div className="privacy-note"><ShieldCheck size={16} /><span>Files stay on this device</span></div>
-          <div className={`connection-state ${apiReady ? 'connected' : ''}`}>
+          <div className={`connection-state ${(isPagesBuild || apiReady) && providerReady ? 'connected' : ''}`}>
             <span className="connection-dot" />
-            {providerReady === null ? `Checking ${activeProvider.label}...` : providerReady ? isPagesBuild ? `${activeProvider.label} key ready` : `${activeProvider.label} connected` : `${activeProvider.label} key needed`}
+            {connectionStatus}
           </div>
         </div>
       </aside>
@@ -566,17 +569,23 @@ function App() {
 
         <div className="composer-area">
           {!files.length && <p className="composer-hint">{isPagesBuild ? 'Choose files or a folder to begin.' : 'Choose files or a folder, or enter a folder path.'}</p>}
-          {files.length > 0 && !providerReady && <p className="composer-hint key-hint">{isPagesBuild ? `Save your ${activeProvider.label} key to ask questions.` : providerReady === null ? `Checking the local ${activeProvider.label} connection...` : `Add ${activeProvider.envKey} to .env, then restart the app.`}</p>}
+          {files.length > 0 && ((!isPagesBuild && !apiReady) || !providerReady) && <p className="composer-hint key-hint">{isPagesBuild
+            ? `Save your ${activeProvider.label} key to ask questions.`
+            : apiReady === null
+              ? 'Checking the local service...'
+              : !apiReady
+                ? 'The local service is unavailable. Start or restart Folio to reconnect.'
+                : `Add ${activeProvider.envKey} to .env or save a ${activeProvider.label} key for this tab.`}</p>}
           <form className="composer" onSubmit={askQuestion}>
             <textarea id="question-input" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
                 event.currentTarget.form?.requestSubmit()
               }
-            }} placeholder={files.length ? 'Ask something about your files...' : 'Choose a folder to begin...'} rows={2} disabled={!files.length || isIndexing || isAsking || !providerReady} />
-            <div className="composer-footer"><span>{indexNotice}</span><button type="submit" className="send-button" aria-label="Ask Folio" disabled={!files.length || !question.trim() || isIndexing || isAsking}><ArrowUp size={18} /></button></div>
+            }} placeholder={files.length ? 'Ask something about your files...' : 'Choose a folder to begin...'} rows={2} disabled={!files.length || isIndexing || isAsking || !canAsk} />
+            <div className="composer-footer"><span>{indexNotice}</span><button type="submit" className="send-button" aria-label="Ask Folio" disabled={!files.length || !question.trim() || isIndexing || isAsking || !canAsk}><ArrowUp size={18} /></button></div>
           </form>
-          <div className="disclosure"><ShieldCheck size={13} /> {isPagesBuild ? 'Matching excerpts go directly to Google Gemini.' : 'Only matching excerpts are sent to Gemini for an answer.'}</div>
+          <div className="disclosure"><ShieldCheck size={13} /> {isPagesBuild ? `Matching excerpts go directly to ${activeProvider.label}.` : `Only matching excerpts are sent to ${activeProvider.label} for an answer.`}</div>
         </div>
       </section>
     </main>

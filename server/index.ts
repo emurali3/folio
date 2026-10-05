@@ -38,6 +38,16 @@ type SourceMatch = {
 }
 
 type Provider = keyof typeof models
+const providerLabels: Record<Provider, string> = {
+  gemini: 'Gemini',
+  openai: 'OpenAI',
+  anthropic: 'Claude',
+}
+const providerEnvKeys: Record<Provider, string> = {
+  gemini: 'GEMINI_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+}
 
 let indexedDocuments: IndexedDocument[] = []
 let indexedFolderName = ''
@@ -134,9 +144,8 @@ function findRelevantPassages(question: string) {
 }
 
 function providerApiKey(provider: Provider) {
-  if (provider === 'gemini') return process.env.GEMINI_API_KEY
-  if (provider === 'openai') return process.env.OPENAI_API_KEY
-  return process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env[providerEnvKeys[provider]]?.trim()
+  return apiKey || undefined
 }
 
 async function generateAnswer(provider: Provider, apiKey: string, question: string, sources: SourceMatch[]) {
@@ -194,9 +203,9 @@ async function generateAnswer(provider: Provider, apiKey: string, question: stri
 
 app.get('/api/health', (_request, response) => {
   const configuredProviders = {
-    gemini: Boolean(process.env.GEMINI_API_KEY),
-    openai: Boolean(process.env.OPENAI_API_KEY),
-    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+    gemini: Boolean(providerApiKey('gemini')),
+    openai: Boolean(providerApiKey('openai')),
+    anthropic: Boolean(providerApiKey('anthropic')),
   }
   response.json({
     configured: configuredProviders.gemini,
@@ -340,16 +349,26 @@ app.post('/api/ask', localOriginOnly, async (request, response) => {
     return
   }
 
-  const { question, provider: requestedProvider, sources: requestSources } = body as { question?: unknown; provider?: unknown; sources?: unknown }
+  const { question, provider: requestedProvider, sources: requestSources, browserApiKey: requestedApiKey } = body as {
+    question?: unknown
+    provider?: unknown
+    sources?: unknown
+    browserApiKey?: unknown
+  }
   if (typeof question !== 'string' || question.trim().length < 2 || question.length > 2000) {
     response.status(400).json({ error: 'Enter a question between 2 and 2,000 characters.' })
     return
   }
-  const provider = requestedProvider === undefined ? 'gemini' : requestedProvider
-  if (typeof provider !== 'string' || !Object.hasOwn(models, provider)) {
-    response.status(400).json({ error: 'Choose Gemini, OpenAI, or Anthropic.' })
+  if (requestedApiKey !== undefined && (typeof requestedApiKey !== 'string' || requestedApiKey.length > 4096)) {
+    response.status(400).json({ error: 'The tab API key was not valid.' })
     return
   }
+  const provider = requestedProvider === undefined ? 'gemini' : requestedProvider
+  if (typeof provider !== 'string' || !Object.hasOwn(models, provider)) {
+    response.status(400).json({ error: 'Choose Gemini, OpenAI, or Claude.' })
+    return
+  }
+  const selectedProvider = provider as Provider
   let validSources: SourceMatch[]
   if (requestSources === undefined) {
     validSources = findRelevantPassages(question.trim())
@@ -379,22 +398,22 @@ app.post('/api/ask', localOriginOnly, async (request, response) => {
     return
   }
 
-  const apiKey = providerApiKey(provider as Provider)
+  const apiKey = providerApiKey(selectedProvider)
+    ?? (typeof requestedApiKey === 'string' ? requestedApiKey.trim() : '')
   if (!apiKey) {
-    const keyName = provider === 'gemini' ? 'GEMINI_API_KEY' : provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'
-    response.status(503).json({ error: `${provider} is not configured. Add ${keyName} to .env and restart ME\\VARS.` })
+    response.status(503).json({ error: `No ${providerLabels[selectedProvider]} API key is available. Set ${providerEnvKeys[selectedProvider]} in .env or save a key for this tab.` })
     return
   }
 
   try {
-    const answer = await generateAnswer(provider as Provider, apiKey, question.trim(), validSources)
+    const answer = await generateAnswer(selectedProvider, apiKey, question.trim(), validSources)
     response.json({
       answer,
       sources: validSources.map(({ id, name, path: sourcePath, excerpt }) => ({ id, name, path: sourcePath, excerpt })),
     })
   } catch (error) {
-    console.error('Gemini request failed:', error instanceof Error ? error.message : 'Unknown error')
-    response.status(502).json({ error: 'Gemini could not answer this request. Check the key, model, and API quota, then try again.' })
+    console.error(`${providerLabels[selectedProvider]} request failed:`, error instanceof Error ? error.message : 'Unknown error')
+    response.status(502).json({ error: `${providerLabels[selectedProvider]} could not answer this request. Check the key, model, and API quota, then try again.` })
   }
 })
 
