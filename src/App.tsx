@@ -356,7 +356,7 @@ function App() {
       const text = (await extractPublicText(finalUrl, response.headers.get('content-type')?.toLowerCase() ?? '', data))
         .slice(0, maxTotalCharacters - currentCharacters)
         .trim()
-      if (!text) throw new Error('No readable text was found at that URL.')
+      if (!text) throw new Error('No readable text was returned. This page may require JavaScript; try a direct document URL or a server-rendered page.')
 
       if (!isPagesBuild && sourceMode === 'path') await fetch('/api/index', { method: 'DELETE' })
       setFiles([...existingFiles, { id: finalUrl.href, name, path: finalUrl.href, text, sizeBytes: data.byteLength }])
@@ -518,7 +518,7 @@ function App() {
             {isIndexing ? <LoaderCircle className="spin" size={17} /> : <Link2 size={17} />}
             <span>{isIndexing ? 'Reading source' : 'Add public URL'}</span>
           </button>
-          <p className="source-note">Public HTTPS only. The site must allow browser access (CORS); content stays in this tab.</p>
+          <p className="source-note">Public HTTPS pages or documents with CORS. JavaScript-only pages may not expose readable text.</p>
         </form>}
 
         <div className="indexed-list" aria-live="polite">

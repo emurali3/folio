@@ -10,7 +10,7 @@ Folio is a local-first document Q&A app. Attach a local file or folder path, or 
 - Search PDF, DOCX, TXT, Markdown, CSV, JSON, LOG, YAML, XML, and HTML files.
 - Review the source passages behind each answer.
 - Index a local file or folder path without uploading documents through the browser.
-- Fetch public webpage and document URLs in the browser when the site permits cross-origin access (CORS).
+- Fetch public webpage and document URLs in the browser when the site permits cross-origin access (CORS). Pages that require client-side JavaScript to render content may not be readable.
 
 Folio supports up to 120 sources, 8 MB per source, and 60 MB total per index.
 
