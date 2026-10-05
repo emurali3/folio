@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { AlertCircle, ArrowUp, FileText, FolderOpen, LoaderCircle, Plus, Search, ShieldCheck, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { AlertCircle, ArrowUp, FileText, FolderOpen, Link2, LoaderCircle, Search, ShieldCheck, Sparkles } from 'lucide-react'
 import './App.css'
 
 const isPagesBuild = import.meta.env.MODE === 'pages'
@@ -9,7 +9,7 @@ type IndexedFile = {
   name: string
   path: string
   text?: string
-  file?: File
+  sizeBytes?: number
 }
 
 type SourceMatch = {
@@ -43,28 +43,58 @@ const providers: Array<{ id: Provider; label: string; model: string; envKey: str
   { id: 'anthropic', label: 'Claude', model: 'claude-haiku-4-5-20251001', envKey: 'ANTHROPIC_API_KEY' },
 ]
 
+const stopWords = new Set(['about', 'after', 'also', 'and', 'are', 'can', 'did', 'does', 'for', 'from', 'have', 'how', 'into', 'its', 'more', 'not', 'our', 'that', 'the', 'their', 'there', 'this', 'was', 'what', 'when', 'where', 'which', 'who', 'with', 'would', 'you', 'your'])
 const maxFiles = 120
 const maxFileBytes = 8 * 1024 * 1024
 const maxTotalBytes = 60 * 1024 * 1024
 const maxTotalCharacters = 24_000_000
-const supportedExtensions = new Set(['txt', 'md', 'csv', 'json', 'log', 'yaml', 'yml', 'xml', 'html', 'pdf', 'docx'])
-const ignoredDirectories = new Set(['node_modules', '.git', '.next', 'dist', 'build', 'coverage', '.venv', 'venv', 'windows', 'program files', 'program files (x86)', '$recycle.bin', 'system volume information'])
-const stopWords = new Set(['about', 'after', 'also', 'and', 'are', 'can', 'did', 'does', 'for', 'from', 'have', 'how', 'into', 'its', 'more', 'not', 'our', 'that', 'the', 'their', 'there', 'this', 'was', 'what', 'when', 'where', 'which', 'who', 'with', 'would', 'you', 'your'])
+const supportedExtensions = new Set(['txt', 'md', 'csv', 'json', 'log', 'yaml', 'yml', 'xml', 'html', 'htm', 'pdf', 'docx'])
+const textExtensions = new Set(['txt', 'md', 'csv', 'json', 'log', 'yaml', 'yml', 'xml'])
 
 function fileExtension(fileName: string) {
   return fileName.split('.').pop()?.toLowerCase() ?? ''
 }
 
-async function extractText(file: File) {
-  const extension = fileExtension(file.name)
+async function readResponseWithinLimit(response: Response, limit: number) {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    const data = await response.arrayBuffer()
+    if (data.byteLength > limit) throw new Error('This public source exceeds the per-source or total size limit.')
+    return data
+  }
 
-  if (extension === 'pdf') {
+  const chunks: Uint8Array[] = []
+  let totalBytes = 0
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    totalBytes += value.byteLength
+    if (totalBytes > limit) {
+      await reader.cancel()
+      throw new Error('This public source exceeds the per-source or total size limit.')
+    }
+    chunks.push(value)
+  }
+
+  const data = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    data.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return data.buffer
+}
+
+async function extractPublicText(url: URL, contentType: string, data: ArrayBuffer) {
+  const extension = fileExtension(url.pathname)
+
+  if (extension === 'pdf' || contentType.includes('application/pdf')) {
     const [pdfjs, worker] = await Promise.all([
       import('pdfjs-dist'),
       import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
     ])
     pdfjs.GlobalWorkerOptions.workerSrc = worker.default
-    const document = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise
+    const document = await pdfjs.getDocument({ data: new Uint8Array(data) }).promise
     const pages: string[] = []
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       const page = await document.getPage(pageNumber)
@@ -74,12 +104,26 @@ async function extractText(file: File) {
     return pages.join('\n\n')
   }
 
-  if (extension === 'docx') {
+  if (extension === 'docx' || contentType.includes('wordprocessingml')) {
     const mammoth = await import('mammoth/mammoth.browser')
-    return (await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() })).value
+    return (await mammoth.extractRawText({ arrayBuffer: data })).value
   }
 
-  return file.text()
+  const markup = new TextDecoder().decode(data)
+  if (extension === 'html' || extension === 'htm' || contentType.includes('text/html')) {
+    const document = new DOMParser().parseFromString(markup, 'text/html')
+    document.querySelectorAll('script, style, noscript, svg, iframe, nav, footer').forEach((element) => element.remove())
+    return document.body.innerText || document.body.textContent || ''
+  }
+
+  const textContentType = contentType.startsWith('text/') || /json|xml|yaml|csv/.test(contentType)
+  if (!supportedExtensions.has(extension) && !textContentType) {
+    throw new Error('This URL is not a supported webpage or document type.')
+  }
+  if (!textExtensions.has(extension) && !textContentType) {
+    throw new Error('This URL is not a supported webpage or document type.')
+  }
+  return markup
 }
 
 function findRelevantPassages(question: string, files: IndexedFile[]) {
@@ -192,14 +236,14 @@ function App() {
   }))
   const [apiKeyDraft, setApiKeyDraft] = useState('')
   const [folderPath, setFolderPath] = useState('')
-  const [sourceMode, setSourceMode] = useState<'selection' | 'path'>('selection')
+  const [sourceUrl, setSourceUrl] = useState('')
+  const [sourceEntryMode, setSourceEntryMode] = useState<'path' | 'url'>(isPagesBuild ? 'url' : 'path')
+  const [sourceMode, setSourceMode] = useState<'path' | 'url'>(isPagesBuild ? 'url' : 'path')
   const [isIndexing, setIsIndexing] = useState(false)
   const [isAsking, setIsAsking] = useState(false)
-  const [indexNotice, setIndexNotice] = useState(isPagesBuild ? 'Choose files or a folder to begin.' : 'Choose files or a folder, or enter a folder path.')
+  const [indexNotice, setIndexNotice] = useState(isPagesBuild ? 'Add a public URL to begin.' : 'Index a local folder path or add a public URL.')
   const [apiReady, setApiReady] = useState<boolean | null>(null)
   const [serverProviders, setServerProviders] = useState<Record<Provider, boolean> | null>(null)
-  const folderPickerRef = useRef<HTMLInputElement>(null)
-  const filePickerRef = useRef<HTMLInputElement>(null)
   const conversationEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -224,6 +268,7 @@ function App() {
         if (data.files?.length) {
           setFiles(data.files)
           setSourceMode('path')
+          setSourceEntryMode('path')
           setIndexNotice(`${data.files.length} files indexed from ${data.folderName ?? 'folder'}`)
         }
       })
@@ -233,70 +278,6 @@ function App() {
   useEffect(() => {
     conversationEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages, isAsking])
-
-  async function addFiles(event: ChangeEvent<HTMLInputElement>) {
-    const selectedFiles = Array.from(event.currentTarget.files ?? [])
-    event.currentTarget.value = ''
-    if (!selectedFiles.length || isIndexing) return
-
-    setIsIndexing(true)
-    let skipped = 0
-    let addedCharacters = files.reduce((total, file) => total + (file.text?.length ?? 0), 0)
-    let addedBytes = files.reduce((total, file) => total + (file.file?.size ?? 0), 0)
-    const indexed: IndexedFile[] = []
-    const alreadyIndexed = new Set(files.map((file) => file.path))
-
-    for (const file of selectedFiles) {
-      const relativePath = file.webkitRelativePath || file.name
-      const extension = fileExtension(file.name)
-      const pathSegments = relativePath.split(/[\\/]/)
-      if (pathSegments.some((segment) => segment.startsWith('.') || ignoredDirectories.has(segment.toLowerCase()))) {
-        skipped += 1
-        continue
-      }
-      if (!supportedExtensions.has(extension) || alreadyIndexed.has(relativePath)) {
-        if (!alreadyIndexed.has(relativePath)) skipped += 1
-        continue
-      }
-      if (files.length + indexed.length >= maxFiles || file.size > maxFileBytes || addedBytes + file.size > maxTotalBytes || addedCharacters >= maxTotalCharacters) {
-        skipped += 1
-        continue
-      }
-
-      setIndexNotice(`Reading ${indexed.length + 1} of ${selectedFiles.length} selected files...`)
-      try {
-        const text = (await extractText(file)).slice(0, maxTotalCharacters - addedCharacters)
-        if (!text.trim()) {
-          skipped += 1
-          continue
-        }
-        indexed.push({
-          id: `${relativePath}:${file.lastModified}`,
-          name: file.name,
-          path: relativePath,
-          text,
-          file,
-        })
-        alreadyIndexed.add(relativePath)
-        addedCharacters += text.length
-        addedBytes += file.size
-      } catch {
-        skipped += 1
-      }
-    }
-
-    if (indexed.length) {
-      if (!isPagesBuild) await fetch('/api/index', { method: 'DELETE' })
-      setFiles((current) => sourceMode === 'path' ? indexed : [...current, ...indexed])
-      setSourceMode('selection')
-      setMessages([])
-      const fileCount = sourceMode === 'path' ? indexed.length : files.length + indexed.length
-      setIndexNotice(`${fileCount} files indexed${skipped ? ` | ${skipped} skipped` : ''}`)
-    } else {
-      setIndexNotice(skipped ? `No supported files added | ${skipped} skipped` : 'Those files are already in your index.')
-    }
-    setIsIndexing(false)
-  }
 
   function saveBrowserApiKey(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -318,7 +299,7 @@ function App() {
     if (!folder || isIndexing) return
 
     setIsIndexing(true)
-    setIndexNotice('Reading supported files from that folder on this PC...')
+    setIndexNotice('Reading the local file or folder path...')
     try {
       const response = await fetch('/api/index-folder', {
         method: 'POST',
@@ -330,10 +311,65 @@ function App() {
       const indexedFiles = data.files ?? []
       setFiles(indexedFiles)
       setSourceMode('path')
+      setSourceEntryMode('path')
       setMessages([])
-      setIndexNotice(`${indexedFiles.length} files indexed from ${data.folderName ?? 'folder'}${data.skipped ? ` | ${data.skipped} skipped` : ''}`)
+      setIndexNotice(`${indexedFiles.length} ${indexedFiles.length === 1 ? 'source' : 'sources'} indexed from ${data.folderName ?? 'path'}${data.skipped ? ` | ${data.skipped} skipped` : ''}`)
     } catch (error) {
       setIndexNotice(error instanceof Error ? error.message : 'Could not read that folder.')
+    } finally {
+      setIsIndexing(false)
+    }
+  }
+
+  async function indexPublicUrl(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!sourceUrl.trim() || isIndexing) return
+
+    setIsIndexing(true)
+    setIndexNotice('Reading the public webpage or document...')
+    try {
+      const url = new URL(sourceUrl.trim())
+      if (url.protocol !== 'https:' || url.username || url.password || ['localhost'].includes(url.hostname) || url.hostname.endsWith('.local')) {
+        throw new Error('Enter a public HTTPS URL without sign-in credentials.')
+      }
+      const existingFiles = sourceMode === 'url' ? files : []
+      if (existingFiles.length >= maxFiles) throw new Error(`A source list can contain up to ${maxFiles} URLs.`)
+      if (existingFiles.some((file) => file.path === url.href)) throw new Error('That URL is already in your source list.')
+      const currentBytes = existingFiles.reduce((total, file) => total + (file.sizeBytes ?? 0), 0)
+      const currentCharacters = existingFiles.reduce((total, file) => total + (file.text?.length ?? 0), 0)
+      const byteLimit = Math.min(maxFileBytes, maxTotalBytes - currentBytes)
+      if (byteLimit <= 0) throw new Error('The total source size limit has been reached.')
+
+      const response = await fetch(url.href, { credentials: 'omit', redirect: 'follow' })
+      if (!response.ok) throw new Error(`The webpage returned status ${response.status}.`)
+      const finalUrl = new URL(response.url)
+      if (finalUrl.protocol !== 'https:' || finalUrl.username || finalUrl.password) {
+        throw new Error('The URL redirected to an address that is not allowed.')
+      }
+      const contentLength = Number(response.headers.get('content-length') ?? 0)
+      if (contentLength > byteLimit) throw new Error('This URL exceeds the 8 MB per-source or 60 MB total limit.')
+      const data = await readResponseWithinLimit(response, byteLimit)
+      if (currentCharacters >= maxTotalCharacters) throw new Error('The source text limit has been reached.')
+
+      const leaf = decodeURIComponent(finalUrl.pathname.split('/').filter(Boolean).pop() ?? '')
+      const name = leaf || finalUrl.hostname
+      const text = (await extractPublicText(finalUrl, response.headers.get('content-type')?.toLowerCase() ?? '', data))
+        .slice(0, maxTotalCharacters - currentCharacters)
+        .trim()
+      if (!text) throw new Error('No readable text was found at that URL.')
+
+      if (!isPagesBuild && sourceMode === 'path') await fetch('/api/index', { method: 'DELETE' })
+      setFiles([...existingFiles, { id: finalUrl.href, name, path: finalUrl.href, text, sizeBytes: data.byteLength }])
+      setSourceMode('url')
+      setSourceEntryMode('url')
+      setMessages([])
+      setSourceUrl('')
+      setIndexNotice(`${existingFiles.length + 1} public ${existingFiles.length ? 'URLs' : 'URL'} indexed`)
+    } catch (error) {
+      const message = error instanceof TypeError
+        ? 'Could not read that URL. It must be public and allow cross-origin browser access (CORS).'
+        : error instanceof Error ? error.message : 'Could not read that URL.'
+      setIndexNotice(message)
     } finally {
       setIsIndexing(false)
     }
@@ -343,7 +379,7 @@ function App() {
     if (sourceMode === 'path') await fetch(`/api/index/${encodeURIComponent(fileId)}`, { method: 'DELETE' })
     const remaining = files.filter((file) => file.id !== fileId)
     setFiles(remaining)
-    setIndexNotice(remaining.length ? `${remaining.length} files indexed` : isPagesBuild ? 'Choose files or a folder to begin.' : 'Choose files or a folder, or enter a folder path.')
+    setIndexNotice(remaining.length ? `${remaining.length} sources indexed` : isPagesBuild ? 'Add a public URL to begin.' : 'Index a local folder path or add a public URL.')
   }
 
   function openSource(sourceId: string) {
@@ -352,10 +388,9 @@ function App() {
       return
     }
     const source = files.find((file) => file.id === sourceId)
-    if (!source?.file) return
-    const url = URL.createObjectURL(source.file)
-    window.open(url, '_blank', 'noopener,noreferrer')
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    if (source?.path.startsWith('https://') || source?.path.startsWith('http://')) {
+      window.open(source.path, '_blank', 'noopener,noreferrer')
+    }
   }
 
   async function askQuestion(event: FormEvent<HTMLFormElement>) {
@@ -366,12 +401,12 @@ function App() {
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: currentQuestion }
     setMessages((current) => [...current, userMessage])
     setQuestion('')
-    const sources = sourceMode === 'selection' ? findRelevantPassages(currentQuestion, files) : undefined
-    if (sourceMode === 'selection' && !sources?.length) {
+    const sources = sourceMode === 'path' ? undefined : findRelevantPassages(currentQuestion, files)
+    if (sourceMode === 'url' && !sources?.length) {
       setMessages((current) => [...current, {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'I could not find a matching passage in the files you selected. Try different wording or add another folder.',
+        content: 'I could not find a matching passage in these sources. Try different wording or add another source.',
       }])
       return
     }
@@ -441,17 +476,8 @@ function App() {
         </div>
 
         <div className="library-heading">
-          <span>YOUR LIBRARY</span>
+          <span>YOUR SOURCES</span>
           <span className="file-count">{files.length.toString().padStart(2, '0')}</span>
-        </div>
-        <div className="library-actions">
-          <button className="folder-action" type="button" onClick={() => folderPickerRef.current?.click()} disabled={isIndexing}>
-            {isIndexing ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}
-            <span>{isIndexing ? 'Reading files' : 'Choose folder'}</span>
-          </button>
-          <button className="file-action" type="button" onClick={() => filePickerRef.current?.click()} disabled={isIndexing}><Plus size={16} /> Add files</button>
-          <input ref={(element) => { folderPickerRef.current = element; element?.setAttribute('webkitdirectory', '') }} className="hidden-input" type="file" multiple onChange={addFiles} />
-          <input ref={filePickerRef} className="hidden-input" type="file" multiple accept=".txt,.md,.csv,.json,.log,.yaml,.yml,.xml,.html,.pdf,.docx" onChange={addFiles} />
         </div>
         <form className="api-key-form" onSubmit={saveBrowserApiKey}>
           <label htmlFor="provider-select">AI PROVIDER</label>
@@ -469,15 +495,31 @@ function App() {
             : `${activeProvider.envKey} in .env takes priority. This tab's key is used only when no .env key is configured.`}</p>
         </form>
         {!isPagesBuild && (
+          <div className="source-mode-switch" role="group" aria-label="Choose a source type">
+            <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'path'} onClick={() => setSourceEntryMode('path')}><FolderOpen size={14} /> Folder path</button>
+            <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'url'} onClick={() => setSourceEntryMode('url')}><Link2 size={14} /> Web URL</button>
+          </div>
+        )}
+        {!isPagesBuild && sourceEntryMode === 'path' && (
           <form className="folder-form" onSubmit={indexFolder}>
-            <label htmlFor="folder-path">OR ENTER A FOLDER PATH</label>
-            <input id="folder-path" value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="C:\\Users\\you\\Documents" disabled={isIndexing} />
+            <label htmlFor="folder-path">LOCAL FILE OR FOLDER PATH</label>
+            <input id="folder-path" value={folderPath} onChange={(event) => setFolderPath(event.target.value)} placeholder="C:\\Users\\you\\Documents\\report.pdf" disabled={isIndexing} />
             <button className="folder-action" type="submit" disabled={!folderPath.trim() || isIndexing}>
               {isIndexing ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}
-              <span>{isIndexing ? 'Indexing folder' : sourceMode === 'path' ? 'Re-index path' : 'Index this path'}</span>
+              <span>{isIndexing ? 'Reading path' : files.length && sourceMode === 'path' ? 'Refresh path' : 'Attach path'}</span>
             </button>
+            <p className="source-note">Read locally by Folio. Document contents are not uploaded.</p>
           </form>
         )}
+        {(isPagesBuild || sourceEntryMode === 'url') && <form className="folder-form url-source-form" onSubmit={indexPublicUrl}>
+          <label htmlFor="public-url">PUBLIC WEB URL</label>
+          <input id="public-url" type="url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://example.com/report.pdf" disabled={isIndexing} />
+          <button className="folder-action" type="submit" disabled={!sourceUrl.trim() || isIndexing}>
+            {isIndexing ? <LoaderCircle className="spin" size={17} /> : <Link2 size={17} />}
+            <span>{isIndexing ? 'Reading source' : 'Add public URL'}</span>
+          </button>
+          <p className="source-note">Public HTTPS only. The site must allow browser access (CORS); content stays in this tab.</p>
+        </form>}
 
         <div className="indexed-list" aria-live="polite">
           {files.length ? files.map((file) => (
@@ -489,14 +531,14 @@ function App() {
           )) : (
             <div className="empty-library">
               <div className="empty-library-icon"><FolderOpen size={19} /></div>
-              <p>No files yet</p>
-              <span>{isPagesBuild ? 'Selected files stay in this browser tab.' : 'Choose files, choose a folder, or enter its path.'}</span>
+              <p>No sources yet</p>
+              <span>{isPagesBuild ? 'Add a public URL to begin.' : 'Attach a local path or add a public URL.'}</span>
             </div>
           )}
         </div>
 
         <div className="rail-footer">
-          <div className="privacy-note"><ShieldCheck size={16} /><span>Files stay on this device</span></div>
+          <div className="privacy-note"><ShieldCheck size={16} /><span>Sources stay on this device</span></div>
           <div className={`connection-state ${(isPagesBuild || apiReady) && providerReady ? 'connected' : ''}`}>
             <span className="connection-dot" />
             {connectionStatus}
@@ -506,7 +548,7 @@ function App() {
 
       <section className="workspace">
         <header className="topbar">
-          <div className="breadcrumb"><span>Library</span><span className="breadcrumb-slash">/</span><strong>Ask your files</strong></div>
+              <div className="breadcrumb"><span>Library</span><span className="breadcrumb-slash">/</span><strong>Ask your sources</strong></div>
           <div className="topbar-right">
             <div className="theme-picker" role="group" aria-label="Choose color theme">
               {themes.map((option) => (
@@ -524,16 +566,16 @@ function App() {
               ))}
             </div>
             <span className="local-pill"><span /> {isPagesBuild ? 'BROWSER INDEX' : 'LOCAL INDEX'}</span>
-            <button className="search-icon" type="button" title="Search indexed files" onClick={() => document.querySelector<HTMLTextAreaElement>('#question-input')?.focus()}><Search size={18} /></button>
+            <button className="search-icon" type="button" title="Search indexed sources" onClick={() => document.querySelector<HTMLTextAreaElement>('#question-input')?.focus()}><Search size={18} /></button>
           </div>
         </header>
 
         <div className={`conversation ${messages.length ? 'has-messages' : ''}`}>
           {!messages.length ? (
             <div className="welcome-screen">
-              <div className="eyebrow"><Sparkles size={14} /> YOUR FILES, IN CONTEXT</div>
-              <h1>Answers from your files.<br /><em>Sources included.</em></h1>
-              <p className="welcome-copy">{isPagesBuild ? 'Choose files or a folder. Folio searches them in your browser and sends only matching excerpts to your chosen AI provider.' : 'Choose files or a folder, or enter a folder path. Ask a question and Folio shows exactly where each answer came from.'}</p>
+              <div className="eyebrow"><Sparkles size={14} /> SOURCES, IN CONTEXT</div>
+              <h1>Answers from your<br /><em>connected sources.</em></h1>
+              <p className="welcome-copy">{isPagesBuild ? 'Grounded answers from public webpages and documents, with the matching sources attached.' : 'Grounded answers from local folders and public webpages, with the matching sources attached.'}</p>
               <div className="suggestion-label">TRY A QUESTION</div>
               <div className="suggestions">
                 {['What are the main deadlines?', 'Summarize the latest notes', 'Find mentions of the budget'].map((suggestion) => (
@@ -561,14 +603,14 @@ function App() {
                   ) : null}
                 </article>
               ))}
-              {isAsking && <div className="thinking"><span className="brand-mark mini" aria-hidden="true"><span /><span /><span /></span><LoaderCircle className="spin" size={16} /> Finding an answer in your files...</div>}
+              {isAsking && <div className="thinking"><span className="brand-mark mini" aria-hidden="true"><span /><span /><span /></span><LoaderCircle className="spin" size={16} /> Finding an answer in your sources...</div>}
               <div ref={conversationEndRef} />
             </div>
           )}
         </div>
 
         <div className="composer-area">
-          {!files.length && <p className="composer-hint">{isPagesBuild ? 'Choose files or a folder to begin.' : 'Choose files or a folder, or enter a folder path.'}</p>}
+          {!files.length && <p className="composer-hint">{isPagesBuild ? 'Add a public URL to begin.' : 'Attach a local path or add a public URL to begin.'}</p>}
           {files.length > 0 && ((!isPagesBuild && !apiReady) || !providerReady) && <p className="composer-hint key-hint">{isPagesBuild
             ? `Save your ${activeProvider.label} key to ask questions.`
             : apiReady === null
@@ -582,7 +624,7 @@ function App() {
                 event.preventDefault()
                 event.currentTarget.form?.requestSubmit()
               }
-            }} placeholder={files.length ? 'Ask something about your files...' : 'Choose a folder to begin...'} rows={2} disabled={!files.length || isIndexing || isAsking || !canAsk} />
+            }} placeholder={files.length ? 'Ask something about your sources...' : 'Add a source to begin...'} rows={2} disabled={!files.length || isIndexing || isAsking || !canAsk} />
             <div className="composer-footer"><span>{indexNotice}</span><button type="submit" className="send-button" aria-label="Ask Folio" disabled={!files.length || !question.trim() || isIndexing || isAsking || !canAsk}><ArrowUp size={18} /></button></div>
           </form>
           <div className="disclosure"><ShieldCheck size={13} /> {isPagesBuild ? `Matching excerpts go directly to ${activeProvider.label}.` : `Only matching excerpts are sent to ${activeProvider.label} for an answer.`}</div>

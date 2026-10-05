@@ -224,24 +224,43 @@ app.post('/api/index-folder', localOriginOnly, async (request, response) => {
   }
 
   let root: string
+  let rootIsFile = false
   try {
     root = await realpath(path.resolve(folderPath.trim()))
-    if (!(await stat(root)).isDirectory()) {
-      response.status(400).json({ error: 'That path is not a folder.' })
+    const rootDetails = await stat(root)
+    if (!rootDetails.isDirectory() && !rootDetails.isFile()) {
+      response.status(400).json({ error: 'That path is not a file or folder.' })
       return
     }
+    rootIsFile = rootDetails.isFile()
   } catch {
-    response.status(404).json({ error: 'That folder could not be found or opened. Check the path and try again.' })
+    response.status(404).json({ error: 'That path could not be found or opened. Check the path and try again.' })
     return
   }
 
-  const pendingDirectories = [root]
+  const pendingDirectories = rootIsFile ? [] : [root]
   const candidates: Array<{ absolutePath: string; relativePath: string; name: string; size: number }> = []
   let skipped = 0
   let totalBytes = 0
   let truncated = false
 
-  while (pendingDirectories.length && candidates.length < maxFiles) {
+  if (rootIsFile) {
+    const name = path.basename(root)
+    const extension = fileExtension(name)
+    const details = await stat(root)
+    if (!supportedExtensions.has(extension)) {
+      response.status(415).json({ error: 'That file type is not supported.' })
+      return
+    }
+    if (details.size > maxFileBytes || details.size > maxTotalBytes) {
+      response.status(413).json({ error: 'That file exceeds the 8 MB per-file or 60 MB total limit.' })
+      return
+    }
+    candidates.push({ absolutePath: root, relativePath: name, name, size: details.size })
+    totalBytes = details.size
+  }
+
+  while (!rootIsFile && pendingDirectories.length && candidates.length < maxFiles) {
     const currentDirectory = pendingDirectories.shift()!
     let entries
     try {
@@ -336,7 +355,7 @@ app.delete('/api/index/:id', localOriginOnly, (request, response) => {
 app.get('/api/open/:id', localOriginOnly, (request, response) => {
   const document = indexedDocuments.find((item) => item.id === request.params.id)
   if (!document) {
-    response.status(404).type('text/plain').send('This file is no longer indexed. Index the folder again.')
+    response.status(404).type('text/plain').send('This source is no longer indexed. Attach its path again.')
     return
   }
   response.set('X-Content-Type-Options', 'nosniff').type('text/plain').send(document.text)

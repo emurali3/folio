@@ -1,23 +1,35 @@
 # Folio
 
-**Answers from your files. Sources included.**
+**Answers from your sources. Sources included.**
 
-Folio is a local-first document Q&A assistant. Choose files or a folder, ask a question, and get a concise answer grounded in the passages it used.
+Folio is a local-first document Q&A app. Attach a local file or folder path, or a public webpage URL, ask a question, and get a concise answer grounded in the passages Folio found.
 
-## Run it
+## Features
 
-1. Copy `.env.example` to `.env`.
-2. Add one or more provider keys as `GEMINI_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` in `.env`. Do not put keys in frontend code or commit `.env`.
-3. Run `npm run dev` and open the local URL shown by Vite.
+- Ask Gemini, OpenAI, or Claude (Anthropic).
+- Search PDF, DOCX, TXT, Markdown, CSV, JSON, LOG, YAML, XML, and HTML files.
+- Review the source passages behind each answer.
+- Index a local file or folder path without uploading documents through the browser.
+- Fetch public webpage and document URLs in the browser when the site permits cross-origin access (CORS).
 
-Choose Gemini, OpenAI, or Claude (Anthropic) in the sidebar. In local mode, Folio uses the selected provider's key from `.env` first. If it is not configured, Folio can use a key saved for the current browser tab; tab keys are kept in `sessionStorage` and sent only to the localhost service. Keys from `.env` stay on the server. With **Choose folder** or **Add files**, Folio reads and searches selected files in browser memory. With a typed folder path, the localhost service reads and searches that folder on disk. Neither mode sends full files: only your question and up to five matching excerpts go to the selected provider. Browser-selected files are cleared on refresh; the path index is cleared when the local service restarts.
+Folio supports up to 120 sources, 8 MB per source, and 60 MB total per index.
 
-Supported formats: PDF, DOCX, TXT, Markdown, CSV, JSON, LOG, YAML, XML, and HTML. Limits: 120 files, 8 MB per file, and 60 MB total file size. Browsers do not disclose a selected folder's absolute path to web apps; the chooser grants Folio permission to read its files locally.
+## Run locally
 
-## GitHub Pages
+1. Install dependencies with `npm ci`.
+2. Copy `.env.example` to `.env`.
+3. Add one or more provider keys to `.env`: `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `ANTHROPIC_API_KEY`. Never commit `.env`.
+4. Run `npm run dev` and open the local address printed by Vite.
 
-Run `npm run build:pages` to build the static site at the `/folio/` project path. Pages mode supports browser-selected files and folders only; browsers cannot grant a web app access to an absolute folder path. Since Pages has no local server or `.env`, each browser tab must provide its own key for Gemini, OpenAI, or Claude. Keys are stored in that tab's `sessionStorage` and sent directly to the selected provider with matching excerpts; they are not embedded in the repository or build output. Browser keys are visible to the browser and must be restricted to the Pages site's HTTP referrer where the provider supports it. Claude (Anthropic) browser requests explicitly opt into direct-browser access.
+The selected provider's key in `.env` takes priority. If it is not configured, Folio uses the key saved for the current browser tab. Tab keys are stored in `sessionStorage` and sent to the local Folio service; keys from `.env` stay on the server. Model overrides are listed in `.env.example`.
 
-GitHub Pages sites are public even when their source repository is private. GitHub requires an eligible paid plan to publish Pages from a private repository. After enabling Pages with **GitHub Actions** as the source, add the repository Actions variable `ENABLE_PAGES` with value `true` to allow the deployment job to run. The workflow builds on pushes to `main` but leaves deployment disabled until that variable is set.
+## Files and privacy
 
-Local development continues to use `.env`, the localhost API, and typed folder paths. Desktop packaging is not configured.
+The local service reads file and folder paths on disk. Public URLs are fetched directly into browser memory and must allow cross-origin requests. Folio sends only your question and up to five matching excerpts to the selected AI provider, not full documents.
+
+Local paths are available only when running Folio on the same machine as the files. A local path index is cleared when the service restarts; URL sources are kept in the current browser tab and cleared on refresh. Browser-only deployments cannot read arbitrary machine paths, so use public HTTPS URLs with CORS enabled there. URLs and local documents are never uploaded to Folio; only matching excerpts are sent to the selected provider.
+
+## Development
+
+- `npm run build` typechecks and builds the local app.
+- `npm run lint` runs the project linter.
