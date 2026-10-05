@@ -89,9 +89,9 @@ function fileExtension(fileName: string) {
 
 function openNativePathDialog(kind: 'file' | 'folder') {
   const dialog = kind === 'file'
-    ? "$dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Multiselect = $false; $dialog.CheckFileExists = $true; $dialog.Filter = 'Supported documents (*.pdf;*.docx;*.txt;*.md;*.csv;*.json;*.log;*.yaml;*.yml;*.xml;*.html)|*.pdf;*.docx;*.txt;*.md;*.csv;*.json;*.log;*.yaml;*.yml;*.xml;*.html|All files (*.*)|*.*'; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.FileName) }"
-    : "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.ShowNewFolderButton = $false; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.SelectedPath) }"
-  const script = `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; ${dialog}`
+    ? "$dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Multiselect = $false; $dialog.CheckFileExists = $true; $dialog.Filter = 'Supported documents (*.pdf;*.docx;*.txt;*.md;*.csv;*.json;*.log;*.yaml;*.yml;*.xml;*.html)|*.pdf;*.docx;*.txt;*.md;*.csv;*.json;*.log;*.yaml;*.yml;*.xml;*.html|All files (*.*)|*.*'; if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.FileName) }"
+    : "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.ShowNewFolderButton = $false; if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.SelectedPath) }"
+  const script = `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; $owner = New-Object System.Windows.Forms.Form; $owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedToolWindow; $owner.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen; $owner.Size = New-Object System.Drawing.Size(1, 1); $owner.Opacity = 0; $owner.Show(); $owner.Activate(); ${dialog}; $owner.Close()`
 
   return new Promise<string>((resolve, reject) => {
     execFile('powershell.exe', ['-NoProfile', '-STA', '-NonInteractive', '-Command', script], {

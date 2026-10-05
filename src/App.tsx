@@ -293,8 +293,8 @@ function App() {
     setBrowserApiKeys((current) => ({ ...current, [provider]: '' }))
   }
 
-  async function indexPath(path: string) {
-    if (!path || isIndexing) return
+  async function indexPath(path: string, pickerIsOpen = false) {
+    if (!path || (isIndexing && !pickerIsOpen)) return
     setIsIndexing(true)
     setIndexNotice('Reading the local file or folder path...')
     try {
@@ -310,7 +310,9 @@ function App() {
       setSourceMode('path')
       setSourceEntryMode('path')
       setMessages([])
-      setIndexNotice(`${indexedFiles.length} ${indexedFiles.length === 1 ? 'source' : 'sources'} indexed from ${data.folderName ?? 'path'}${data.skipped ? ` | ${data.skipped} skipped` : ''}`)
+      setIndexNotice(indexedFiles.length
+        ? `${indexedFiles.length} ${indexedFiles.length === 1 ? 'source' : 'sources'} indexed from ${data.folderName ?? 'path'}${data.skipped ? ` | ${data.skipped} skipped` : ''}`
+        : `No readable supported documents found in ${data.folderName ?? 'that path'}. Select a file or folder containing PDF, DOCX, TXT, Markdown, CSV, JSON, LOG, YAML, XML, or HTML.`)
     } catch (error) {
       setIndexNotice(error instanceof Error ? error.message : 'Could not read that folder.')
     } finally {
@@ -326,6 +328,7 @@ function App() {
 
   async function chooseNativePath(kind: 'file' | 'folder') {
     if (isIndexing) return
+    setIsIndexing(true)
     setIndexNotice(`Choose a local ${kind}...`)
     try {
       const response = await fetch('/api/pick-path', {
@@ -337,13 +340,15 @@ function App() {
       if (!response.ok) throw new Error(data.error || `Could not open the ${kind} picker.`)
       if (data.cancelled || !data.path) {
         setIndexNotice('Path selection cancelled.')
+        setIsIndexing(false)
         return
       }
       setFolderPath(data.path)
       setSourceEntryMode('select')
-      await indexPath(data.path)
+      await indexPath(data.path, true)
     } catch (error) {
       setIndexNotice(error instanceof Error ? error.message : `Could not choose a local ${kind}.`)
+      setIsIndexing(false)
     }
   }
 
