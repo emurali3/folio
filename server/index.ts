@@ -1,4 +1,5 @@
 import express from 'express'
+import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readdir, readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -84,6 +85,24 @@ function fileSummaries() {
 
 function fileExtension(fileName: string) {
   return path.extname(fileName).slice(1).toLowerCase()
+}
+
+function openNativePathDialog(kind: 'file' | 'folder') {
+  const dialog = kind === 'file'
+    ? "$dialog = New-Object System.Windows.Forms.OpenFileDialog; $dialog.Multiselect = $false; $dialog.CheckFileExists = $true; $dialog.Filter = 'Supported documents (*.pdf;*.docx;*.txt;*.md;*.csv;*.json;*.log;*.yaml;*.yml;*.xml;*.html)|*.pdf;*.docx;*.txt;*.md;*.csv;*.json;*.log;*.yaml;*.yml;*.xml;*.html|All files (*.*)|*.*'; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.FileName) }"
+    : "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog; $dialog.ShowNewFolderButton = $false; if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::WriteLine($dialog.SelectedPath) }"
+  const script = `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; ${dialog}`
+
+  return new Promise<string>((resolve, reject) => {
+    execFile('powershell.exe', ['-NoProfile', '-STA', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      windowsHide: false,
+      timeout: 0,
+    }, (error, stdout) => {
+      if (error) reject(error)
+      else resolve(stdout.trim())
+    })
+  })
 }
 
 async function extractText(filePath: string, extension: string) {
@@ -214,6 +233,25 @@ app.get('/api/health', (_request, response) => {
     files: fileSummaries(),
     folderName: indexedFolderName,
   })
+})
+
+app.post('/api/pick-path', localOriginOnly, async (request, response) => {
+  const kind = request.body?.kind
+  if (kind !== 'file' && kind !== 'folder') {
+    response.status(400).json({ error: 'Choose a file or folder picker.' })
+    return
+  }
+  if (process.platform !== 'win32') {
+    response.status(501).json({ error: 'Native path selection is currently available on Windows. Enter the path manually.' })
+    return
+  }
+
+  try {
+    const selectedPath = await openNativePathDialog(kind)
+    response.json({ path: selectedPath || undefined, cancelled: !selectedPath })
+  } catch {
+    response.status(500).json({ error: `Could not open the Windows ${kind} picker.` })
+  }
 })
 
 app.post('/api/index-folder', localOriginOnly, async (request, response) => {

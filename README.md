@@ -9,7 +9,8 @@ Folio is a local-first document Q&A app. Attach a local file or folder path, or 
 - Ask Gemini, OpenAI, or Claude (Anthropic).
 - Search PDF, DOCX, TXT, Markdown, CSV, JSON, LOG, YAML, XML, and HTML files.
 - Review the source passages behind each answer.
-- Index a local file or folder path without uploading documents through the browser.
+- Select a local file or folder with the Windows path picker, or enter its path manually.
+- Read local documents from disk through Folio's local service; the browser does not upload file contents.
 - Fetch public webpage and document URLs in the browser when the site permits cross-origin access (CORS). Pages that require client-side JavaScript to render content may not be readable.
 
 Folio supports up to 120 sources, 8 MB per source, and 60 MB total per index.
@@ -25,9 +26,9 @@ The selected provider's key in `.env` takes priority. If it is not configured, F
 
 ## Files and privacy
 
-The local service reads file and folder paths on disk. Public URLs are fetched directly into browser memory and must allow cross-origin requests. Folio sends only your question and up to five matching excerpts to the selected AI provider, not full documents.
+The local service reads selected file or folder paths directly from disk. Public URLs are fetched by the browser and must allow cross-origin requests. Folio sends only your question and up to five matching excerpts to the selected AI provider, not full documents.
 
-Local paths are available only when running Folio on the same machine as the files. A local path index is cleared when the service restarts; URL sources are kept in the current browser tab and cleared on refresh. Browser-only deployments cannot read arbitrary machine paths, so use public HTTPS URLs with CORS enabled there. URLs and local documents are never uploaded to Folio; only matching excerpts are sent to the selected provider.
+Local path selection is available when Folio runs on the same Windows machine as the files. The native picker passes only the selected path to Folio; document contents stay on disk and are read by the local service. A local index is cleared when the service restarts. The browser-only site cannot access machine paths, so use a public HTTPS URL with CORS enabled there. Source files are never uploaded to Folio; only matching excerpts are sent to the selected provider.
 
 ## Development
 

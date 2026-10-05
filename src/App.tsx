@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { AlertCircle, ArrowUp, FileText, FolderOpen, Link2, LoaderCircle, Search, ShieldCheck, Sparkles } from 'lucide-react'
+import { AlertCircle, ArrowUp, FilePlus2, FileText, FolderOpen, Link2, LoaderCircle, Search, ShieldCheck, Sparkles } from 'lucide-react'
 import './App.css'
 
 const isPagesBuild = import.meta.env.MODE === 'pages'
@@ -237,11 +237,11 @@ function App() {
   const [apiKeyDraft, setApiKeyDraft] = useState('')
   const [folderPath, setFolderPath] = useState('')
   const [sourceUrl, setSourceUrl] = useState('')
-  const [sourceEntryMode, setSourceEntryMode] = useState<'path' | 'url'>(isPagesBuild ? 'url' : 'path')
+  const [sourceEntryMode, setSourceEntryMode] = useState<'select' | 'path' | 'url'>(isPagesBuild ? 'url' : 'select')
   const [sourceMode, setSourceMode] = useState<'path' | 'url'>(isPagesBuild ? 'url' : 'path')
   const [isIndexing, setIsIndexing] = useState(false)
   const [isAsking, setIsAsking] = useState(false)
-  const [indexNotice, setIndexNotice] = useState(isPagesBuild ? 'Add a public URL to begin.' : 'Index a local folder path or add a public URL.')
+  const [indexNotice, setIndexNotice] = useState(isPagesBuild ? 'Add a public URL to begin.' : 'Select a local file/folder, enter a path, or add a public URL.')
   const [apiReady, setApiReady] = useState<boolean | null>(null)
   const [serverProviders, setServerProviders] = useState<Record<Provider, boolean> | null>(null)
   const conversationEndRef = useRef<HTMLDivElement>(null)
@@ -293,18 +293,15 @@ function App() {
     setBrowserApiKeys((current) => ({ ...current, [provider]: '' }))
   }
 
-  async function indexFolder(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const folder = folderPath.trim().replace(/^(["']).*\1$/, (value) => value.slice(1, -1))
-    if (!folder || isIndexing) return
-
+  async function indexPath(path: string) {
+    if (!path || isIndexing) return
     setIsIndexing(true)
     setIndexNotice('Reading the local file or folder path...')
     try {
       const response = await fetch('/api/index-folder', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderPath: folder }),
+        body: JSON.stringify({ folderPath: path }),
       })
       const data = await response.json() as { files?: IndexedFile[]; folderName?: string; skipped?: number; error?: string }
       if (!response.ok) throw new Error(data.error || 'Could not read that folder.')
@@ -318,6 +315,35 @@ function App() {
       setIndexNotice(error instanceof Error ? error.message : 'Could not read that folder.')
     } finally {
       setIsIndexing(false)
+    }
+  }
+
+  async function indexFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const path = folderPath.trim().replace(/^("').*\1$/, (value) => value.slice(1, -1))
+    await indexPath(path)
+  }
+
+  async function chooseNativePath(kind: 'file' | 'folder') {
+    if (isIndexing) return
+    setIndexNotice(`Choose a local ${kind}...`)
+    try {
+      const response = await fetch('/api/pick-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind }),
+      })
+      const data = await response.json() as { path?: string; cancelled?: boolean; error?: string }
+      if (!response.ok) throw new Error(data.error || `Could not open the ${kind} picker.`)
+      if (data.cancelled || !data.path) {
+        setIndexNotice('Path selection cancelled.')
+        return
+      }
+      setFolderPath(data.path)
+      setSourceEntryMode('select')
+      await indexPath(data.path)
+    } catch (error) {
+      setIndexNotice(error instanceof Error ? error.message : `Could not choose a local ${kind}.`)
     }
   }
 
@@ -379,7 +405,7 @@ function App() {
     if (sourceMode === 'path') await fetch(`/api/index/${encodeURIComponent(fileId)}`, { method: 'DELETE' })
     const remaining = files.filter((file) => file.id !== fileId)
     setFiles(remaining)
-    setIndexNotice(remaining.length ? `${remaining.length} sources indexed` : isPagesBuild ? 'Add a public URL to begin.' : 'Index a local folder path or add a public URL.')
+    setIndexNotice(remaining.length ? `${remaining.length} sources indexed` : isPagesBuild ? 'Add a public URL to begin.' : 'Select a local file/folder, enter a path, or add a public URL.')
   }
 
   function openSource(sourceId: string) {
@@ -390,6 +416,7 @@ function App() {
     const source = files.find((file) => file.id === sourceId)
     if (source?.path.startsWith('https://') || source?.path.startsWith('http://')) {
       window.open(source.path, '_blank', 'noopener,noreferrer')
+      return
     }
   }
 
@@ -494,12 +521,19 @@ function App() {
             ? `Stored in this tab only and sent directly to ${activeProvider.label}. Restrict the key to this site's referrer.`
             : `${activeProvider.envKey} in .env takes priority. This tab's key is used only when no .env key is configured.`}</p>
         </form>
-        {!isPagesBuild && (
-          <div className="source-mode-switch" role="group" aria-label="Choose a source type">
-            <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'path'} onClick={() => setSourceEntryMode('path')}><FolderOpen size={14} /> Folder path</button>
-            <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'url'} onClick={() => setSourceEntryMode('url')}><Link2 size={14} /> Web URL</button>
+        <div className={`source-mode-switch ${isPagesBuild ? 'two-source-modes' : ''}`} role="group" aria-label="Choose a source type">
+          {!isPagesBuild && <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'select'} onClick={() => setSourceEntryMode('select')}><FilePlus2 size={14} /> Select</button>}
+          {!isPagesBuild && <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'path'} onClick={() => setSourceEntryMode('path')}><FolderOpen size={14} /> Path</button>}
+          <button type="button" className="source-mode-button" aria-pressed={sourceEntryMode === 'url'} onClick={() => setSourceEntryMode('url')}><Link2 size={14} /> Web URL</button>
+        </div>
+        {!isPagesBuild && sourceEntryMode === 'select' && <div className="folder-form device-source-form">
+          <label>SELECT A LOCAL PATH</label>
+          <div className="device-source-actions">
+            <button className="folder-action" type="button" onClick={() => chooseNativePath('file')} disabled={isIndexing}><FilePlus2 size={16} /> Select file</button>
+            <button className="folder-action" type="button" onClick={() => chooseNativePath('folder')} disabled={isIndexing}><FolderOpen size={16} /> Select folder</button>
           </div>
-        )}
+          <p className="source-note">The local app reads the selected path. No browser file upload.</p>
+        </div>}
         {!isPagesBuild && sourceEntryMode === 'path' && (
           <form className="folder-form" onSubmit={indexFolder}>
             <label htmlFor="folder-path">LOCAL FILE OR FOLDER PATH</label>
@@ -532,7 +566,7 @@ function App() {
             <div className="empty-library">
               <div className="empty-library-icon"><FolderOpen size={19} /></div>
               <p>No sources yet</p>
-              <span>{isPagesBuild ? 'Add a public URL to begin.' : 'Attach a local path or add a public URL.'}</span>
+              <span>{isPagesBuild ? 'Add a public URL to begin.' : 'Select a local path, enter one, or add a public URL.'}</span>
             </div>
           )}
         </div>
@@ -610,7 +644,7 @@ function App() {
         </div>
 
         <div className="composer-area">
-          {!files.length && <p className="composer-hint">{isPagesBuild ? 'Add a public URL to begin.' : 'Attach a local path or add a public URL to begin.'}</p>}
+          {!files.length && <p className="composer-hint">{isPagesBuild ? 'Add a public URL to begin.' : 'Select a local path, enter one, or add a public URL to begin.'}</p>}
           {files.length > 0 && ((!isPagesBuild && !apiReady) || !providerReady) && <p className="composer-hint key-hint">{isPagesBuild
             ? `Save your ${activeProvider.label} key to ask questions.`
             : apiReady === null

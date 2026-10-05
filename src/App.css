@@ -86,10 +86,14 @@ h1 em { color: var(--coral); font-weight: 400; }
 .api-key-form > input:focus, .api-key-form select:focus, .local-provider-select select:focus { border-color: var(--leaf-light); box-shadow: 0 0 0 2px #c8f27724; }
 .api-key-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .api-key-note { padding: 0 3px; color: var(--side-muted); font-size: 10px; line-height: 1.45; }
-.source-mode-switch { display: grid; order: 1; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 17px; padding: 3px; border: 1px solid var(--side-line); border-radius: 5px; background: var(--side-input); }
+.source-mode-switch { display: grid; order: 1; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; margin-top: 17px; padding: 3px; border: 1px solid var(--side-line); border-radius: 5px; background: var(--side-input); }
+.source-mode-switch.two-source-modes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .source-mode-button { display: flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; min-height: 34px; padding: 0 7px; border: 1px solid transparent; border-radius: 3px; color: var(--side-muted); background: transparent; font-size: 11px; }
 .source-mode-button[aria-pressed='true'] { border-color: var(--side-input-line); color: var(--side-text); background: var(--side-button); }
 .source-mode-button:focus-visible { outline: 2px solid var(--leaf-light); outline-offset: 2px; }
+.device-source-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.device-source-actions .folder-action { justify-content: center; min-width: 0; padding: 0 7px; font-size: 11px; }
+.hidden-input { display: none; }
 .source-note { padding: 0 3px; color: var(--side-muted); font-size: 10px; line-height: 1.45; }
 .message-content { color: #354139; font-size: 14px; line-height: 1.75; white-space: pre-wrap; }
 .message-error .message-content { color: #a24a39; }
@@ -150,6 +154,7 @@ h1 em { color: var(--coral); font-weight: 400; }
   .message.user { max-width: 90%; }
   .composer-area { padding: 10px 14px 13px; }
   .source-mode-button { font-size: 10px; }
+  .device-source-actions .folder-action { min-height: 38px; font-size: 10px; }
   .disclosure { font-size: 9px; }
 }
 
