@@ -1,4 +1,4 @@
-name: Build and deploy MEVARS Pages
+name: Build and deploy Folio Pages
 
 on:
   push:
